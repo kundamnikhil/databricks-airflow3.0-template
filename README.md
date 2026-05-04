@@ -1,85 +1,65 @@
-# Databricks and airflow 3.0 template
+# Data Platform — Airflow 3.0 + Databricks + Kubernetes
 
-Supporting notes for Youtube tutorial: https://youtu.be/92X54U6gm0Y
+A production-style end-to-end data platform built from scratch.
 
-Implements a bare-bones data platform using Databricks as Transformation tool, plus Airflow 3.0 on Kubernetes for orchestration, deployed on a local Kubernetes kind cluster.
+## Architecture
+## Architecture
+REST API (JSONPlaceholder)
+↓
+Airflow 3.0 (Orchestration - Asset-aware scheduling)
+↓
+Databricks (Transformation - Medallion Architecture)
+↓
+Delta Lake (Storage - ACID, Time Travel, Upserts)
 
-Some batteries included features are:
+## Tech Stack
 
-- Data Aware orchestration using Data Assets
-- Declarative transformation on top of Databricks notebooks
-- Incremental upsert loading using Delta Lake
-- Local kubernetes cluster running on Kind
-- Data Quality checks using DQX library
-- Git-sync sidecar to mount `/dag/` folders in your Airflow deployment
-- Local Persistent Volume and Persistent Volume Claims for logging
-- CI/CD using Github actions
-- AWS ECR for container repository
+- **Orchestration:** Apache Airflow 3.0 on Kubernetes (Kind) via Helm
+- **Compute:** Databricks (PySpark notebooks)
+- **Storage:** Delta Lake (Bronze / Silver / Gold)
+- **Data Quality:** Custom DQX-style checks with quarantine routing
+- **GitOps:** git-sync sidecar auto-syncs DAGs from GitHub
+- **CI/CD:** GitHub Actions + Docker
+- **Infrastructure:** Kubernetes (Kind), Helm, PV/PVC for log persistence
 
-## Installation
+## Pipeline Flow
+produce_data_assets (Airflow DAG)
+→ Fetches posts + users from JSONPlaceholder API
+→ Marks Assets as updated
+trigger_databricks_workflow_dag (auto-triggered by Assets)
+→ bronze_posts: Ingest 100 posts → Delta table
+→ bronze_users: Ingest 10 users → Delta table
+→ silver_posts: Clean + validate + DQX checks + MERGE upsert
+→ gold_most_popular_tags: User engagement metrics
+→ gold_posts_users: Joined OBT for analytics
 
-To set up a Kind cluster locally:
+## Key Features
 
+- **Asset-aware scheduling** — downstream DAGs trigger when upstream data is ready, not on a clock
+- **Incremental upserts** — Delta MERGE handles late arrivals and deduplication
+- **Data quality gating** — bad records routed to quarantine, never silently dropped
+- **Time travel** — every table version queryable for audit and compliance
+- **GitOps** — push to GitHub, DAGs auto-deploy to cluster in 60 seconds
+- **Full audit trail** — Delta history tracks every write with job ID, user, timestamp
+
+## Local Setup
+
+### Prerequisites
+- Windows with WSL2 + Docker Desktop
+- Kind, kubectl, Helm
+- Databricks account (free tier works)
+
+### Install
 ```bash
-./install_airflow.sh
-```
-
-To install with persistent logs using PV/PVCs, run:
-
-```bash
+git clone https://github.com/kundamnikhil/databricks-airflow3.0-template.git
+cd databricks-airflow3.0-template
 ./install_airflow_with_persistence.sh
 ```
 
-To install using AWS ECR to store your docker images, run:
+### Configure
+1. Add Databricks connection in Airflow UI (Admin → Connections)
+2. Create git-credentials secret (see k8s/secrets/git-secrets.yaml template)
+3. Update job IDs in dags/trigger_databricks_workflow_dag.py
 
-```bash
-./install_airflow_with_ecr.sh
-```
-
-Additionally, you will need to setup your personal access tokens / aws secrets for the following:
-
-1. AWS IAM Service User access tokens
-2. Databricks account personal access token
-3. Git classic token for git-sync feature
-
-To generate your secrets for git sync, use base64 encoding, i.e.
-
-```bash
-echo -n 'your_github_classic_token_here' | base64
-echo -n 'your_github_username_token_here' | base64
-```
-
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: git-credentials
-  namespace: airflow
-data:
-  GITSYNC_USERNAME: <base64 encoded user name here>
-  GITSYNC_PASSWORD: <base64 encoded Git classic token here>
-  GIT_SYNC_USERNAME: <base64 encoded user name here>
-  GIT_SYNC_PASSWORD: <base64 encoded Git classic token here>
-```
-
-To enable CI/CD using github actions, set these two secret environment variables in your console:
-
-```yaml
----
-- name: Configure AWS Creds
-  uses: aws-actions/configure-aws-credentials@v2
-  with:
-    aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-    aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-    aws-region: us-east-1
-```
-
-## Architecture
-
-![architecture.png](architecture.png)
-
-## Disclaimer
-
-Not production ready code - gives the reader a rough idea on how to deploy your own data platform.
-
-Recommended to add more production ready features, such as running this on AWS EKS (Elastic Kubernetes Service), using S3 Remote for logging, replacing Airflow's Postgres instance with own Postgres server, keeping secrets in something like Vault or secrets manager and much more.
+## Author
+Venkata Nikhil Kundam — [LinkedIn](https://linkedin.com/in/kundamnikhil)
